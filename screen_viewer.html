@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Extended Screen Viewer</title>
+    <style>
+        /* Base styles for layout */
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background: #1a1a1a;
+            color: white;
+        }
+
+        /* Main container for all elements */
+        .container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        /* Status bar styling */
+        .status-bar {
+            background: #333;
+            padding: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        /* Connection indicator styles */
+        .connection-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .status-indicator {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #ff4444; /* Default to disconnected red */
+        }
+
+        .connected {
+            background: #44ff44; /* Green when connected */
+        }
+
+        /* Controls panel styling */
+        .controls {
+            padding: 10px;
+            background: #333;
+        }
+
+        .control-group {
+            margin: 10px 0;
+        }
+
+        /* Screen container styles */
+        .screen-container {
+            flex-grow: 1;
+            position: relative;
+            overflow: hidden;
+        }
+
+        /* Main screen image */
+        #screen {
+            width: 100%;
+            height: 100%;
+            object-fit: contain; /* Default fit mode */
+        }
+
+        /* Error message styling */
+        .error-message {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: #ff4444;
+            padding: 20px;
+            border-radius: 5px;
+            display: none;
+        }
+
+        /* Button styling */
+        button {
+            background: #4CAF50;
+            border: none;
+            color: white;
+            padding: 8px 16px;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+
+        button:hover {
+            background: #45a049;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Status bar shows connection state and basic info -->
+        <div class="status-bar">
+            <div class="connection-status">
+                <div class="status-indicator"></div>
+                <span id="connection-text">Disconnected</span>
+            </div>
+            <div id="fps-counter">FPS: 0</div>
+        </div>
+
+        <!-- Controls for adjusting the display -->
+        <div class="controls">
+            <div class="control-group">
+                <label for="fit-mode">Display Mode:</label>
+                <select id="fit-mode">
+                    <option value="contain">Fit Screen</option>
+                    <option value="cover">Fill Screen</option>
+                    <option value="none">Original Size</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <button id="reconnect-button">Reconnect</button>
+            </div>
+        </div>
+
+        <!-- Main screen display area -->
+        <div class="screen-container">
+            <img id="screen" alt="Shared Screen">
+        </div>
+
+        <!-- Error message container -->
+        <div id="error-message" class="error-message">
+            Connection lost. Attempting to reconnect...
+        </div>
+    </div>
+
+    <script>
+        // Configuration object for easy updates
+        const config = {
+            serverUrl: "ws://192.168.100.87:8765",
+            reconnectDelay: 3000, // 3 seconds
+            fpsUpdateInterval: 1000, // 1 second
+        };
+
+        // State management
+        let websocket = null;
+        let frameCount = 0;
+        let lastFrameTime = performance.now();
+        let reconnectTimeout = null;
+
+        // DOM Elements
+        const elements = {
+            screen: document.getElementById('screen'),
+            statusIndicator: document.querySelector('.status-indicator'),
+            connectionText: document.getElementById('connection-text'),
+            errorMessage: document.getElementById('error-message'),
+            fpsCounter: document.getElementById('fps-counter'),
+            fitMode: document.getElementById('fit-mode'),
+            reconnectButton: document.getElementById('reconnect-button')
+        };
+
+        // Initialize WebSocket connection
+        function connectWebSocket() {
+            if (websocket) {
+                websocket.close();
+            }
+
+            websocket = new WebSocket(config.serverUrl);
+            setupWebSocketHandlers();
+        }
+
+        // Set up WebSocket event handlers
+        function setupWebSocketHandlers() {
+            websocket.onopen = () => {
+                updateConnectionStatus(true);
+                hideError();
+            };
+
+            websocket.onclose = () => {
+                updateConnectionStatus(false);
+                scheduleReconnect();
+            };
+
+            websocket.onerror = (error) => {
+                console.error('WebSocket Error:', error);
+                showError('Connection error occurred');
+            };
+
+            websocket.onmessage = (event) => {
+                updateScreen(event.data);
+                updateFPS();
+            };
+        }
+
+        // Update the screen with new frame data
+        function updateScreen(frameData) {
+            elements.screen.src = "data:image/jpeg;base64," + frameData;
+            frameCount++;
+        }
+
+        // Update connection status indicators
+        function updateConnectionStatus(connected) {
+            elements.statusIndicator.classList.toggle('connected', connected);
+            elements.connectionText.textContent = connected ? 'Connected' : 'Disconnected';
+        }
+
+        // FPS calculation and display
+        function updateFPS() {
+            const currentTime = performance.now();
+            if (currentTime - lastFrameTime >= config.fpsUpdateInterval) {
+                const fps = Math.round((frameCount * 1000) / (currentTime - lastFrameTime));
+                elements.fpsCounter.textContent = `FPS: ${fps}`;
+                frameCount = 0;
+                lastFrameTime = currentTime;
+            }
+        }
+
+        // Error handling
+        function showError(message) {
+            elements.errorMessage.textContent = message;
+            elements.errorMessage.style.display = 'block';
+        }
+
+        function hideError() {
+            elements.errorMessage.style.display = 'none';
+        }
+
+        // Reconnection logic
+        function scheduleReconnect() {
+            if (!reconnectTimeout) {
+                reconnectTimeout = setTimeout(() => {
+                    reconnectTimeout = null;
+                    connectWebSocket();
+                }, config.reconnectDelay);
+            }
+        }
+
+        // Event Listeners
+        elements.fitMode.addEventListener('change', (e) => {
+            elements.screen.style.objectFit = e.target.value;
+        });
+
+        elements.reconnectButton.addEventListener('click', () => {
+            clearTimeout(reconnectTimeout);
+            reconnectTimeout = null;
+            connectWebSocket();
+        });
+
+        // Initial connection
+        connectWebSocket();
+    </script>
+</body>
+</html>
